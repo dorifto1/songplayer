@@ -1,232 +1,235 @@
-""" # Example file showing a circle moving on screen
-import pygame
+"""Song Player - pygame version.
 
-# pygame setup
-pygame.init()
-screen = pygame.display.set_mode((1280, 720))
-clock = pygame.time.Clock()
-running = True
-dt = 0
+pygame plays the music and draws the window.
+Pillow (PIL) opens the album art (it can read .jpg, .png AND .webp)
+and resizes it before we hand it to pygame.
 
-player_pos = pygame.Vector2(screen.get_width() / 2, screen.get_height() / 2)
-
-while running:
-    # poll for events
-    # pygame.QUIT event means the user clicked X to close your window
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-    screen.fill("white")
-    pygame.mixer.music.load
-    
-
-
-    # flip() the display to put your work on screen
-    pygame.display.flip()
-
-    # limits FPS to 60
-    # dt is delta time in seconds since last frame, used for framerate-
-    # independent physics.
-    dt = clock.tick(60) / 1000
-
-pygame.quit()
-pygame.joystick.init()
- """
-
-#!/usr/bin/env python
-""" pygame.examples.chimp
-
-This simple example is used for the line-by-line tutorial
-that comes with pygame. It is based on a 'popular' web banner.
-Note there are comments here, but for the full explanation,
-follow along in the tutorial.
+Controls
+    1-9 / click a song   play that song
+    N or Right arrow     skip to the next song
+    P or Left arrow      go back to the previous song
+    Space                pause / resume
+    Esc                  quit
 """
 
-
-# Import Modules
 import os
-import pygame as pg
 
-if not pg.font:
-    print("Warning, fonts disabled")
-if not pg.mixer:
-    print("Warning, sound disabled")
+import pygame
+from PIL import Image
 
-main_dir = os.path.split(os.path.abspath(__file__))[0]
-data_dir = os.path.join(main_dir, "data")
+# Every path is relative to the folder this file lives in,
+# so the player works no matter where you run it from.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------
+# The playlist: a list of dictionaries.
+# Each song keeps its file location, its information and its album art link.
+# Put your 3 mp3 files in the "songs" folder and your covers in "art",
+# then change the names below to match.
+# ---------------------------------------------------------------------------
+playlist = [
+    {
+        "title": "Song One",
+        "artist": "Artist One",
+        "album": "Album One",
+        "file": "songs/song1.mp3",
+        "art": "art/song1.jpg",
+    },
+    {
+        "title": "Song Two",
+        "artist": "Artist Two",
+        "album": "Album Two",
+        "file": "songs/song2.mp3",
+        "art": "art/song2.jpg",
+    },
+    {
+        "title": "Song Three",
+        "artist": "Artist Three",
+        "album": "Album Three",
+        "file": "songs/song3.mp3",
+        "art": "art/song3.jpg",
+    },
+]
+
+# Used when a song's album art file can't be found.
+DEFAULT_ART = "download.webp"
+
+# Window layout
+WIDTH, HEIGHT = 900, 500
+ART_SIZE = 360
+ART_POS = (40, 70)
+LIST_X = 440
+LIST_Y = 110
+ROW_HEIGHT = 50
+
+# Colors
+BG = (24, 26, 33)
+TEXT = (235, 235, 240)
+DIM = (140, 145, 160)
+ACCENT = (80, 200, 140)
+HIGHLIGHT = (45, 50, 64)
+ERROR = (230, 90, 90)
+
+def full_path(relative):
+    return os.path.join(BASE_DIR, relative)
 
 
-# functions to create our resources
-def load_image(name, colorkey=None, scale=1):
-    fullname = os.path.join(data_dir, name)
-    image = pg.image.load(fullname)
-    image = image.convert()
+def load_album_art(song):
+    """Open the album art with Pillow and turn it into a pygame Surface."""
+    path = full_path(song["art"])
+    if not os.path.exists(path):
+        path = full_path(DEFAULT_ART)
 
-    size = image.get_size()
-    size = (size[0] * scale, size[1] * scale)
-    image = pg.transform.scale(image, size)
-
-    if colorkey is not None:
-        if colorkey == -1:
-            colorkey = image.get_at((0, 0))
-        image.set_colorkey(colorkey, pg.RLEACCEL)
-    return image, image.get_rect()
+    image = Image.open(path).convert("RGB")
+    # Scale to fit inside ART_SIZE x ART_SIZE without stretching
+    image.thumbnail((ART_SIZE, ART_SIZE))
+    return pygame.image.frombytes(image.tobytes(), image.size, "RGB")
 
 
-def load_sound(name):
-    class NoneSound:
-        def play(self):
-            pass
-
-    if not pg.mixer or not pg.mixer.get_init():
-        return NoneSound()
-
-    fullname = os.path.join(data_dir, name)
-    sound = pg.mixer.Sound(fullname)
-
-    return sound
-
-
-# classes for our game objects
-class Fist(pg.sprite.Sprite):
-    """moves a clenched fist on the screen, following the mouse"""
-
+class Player:
     def __init__(self):
-        pg.sprite.Sprite.__init__(self)  # call Sprite initializer
-        self.image, self.rect = load_image("fist.png", -1)
-        self.fist_offset = (-235, -80)
-        self.punching = False
+        self.index = None        # which song in the playlist is loaded
+        self.paused = False
+        self.playing = False     # True while a real song file is loaded
+        self.art = None
+        self.message = "Pick a song to start"
 
-    def update(self):
-        """move the fist based on the mouse position"""
-        pos = pg.mouse.get_pos()
-        self.rect.topleft = pos
-        self.rect.move_ip(self.fist_offset)
-        if self.punching:
-            self.rect.move_ip(15, 25)
+    def play(self, index):
+        """Load the song at this position in the playlist and play it."""
+        self.index = index % len(playlist)   # % wraps around the end
+        song = playlist[self.index]
+        self.art = load_album_art(song)      # show the art when the song loads
+        self.paused = False
 
-    def punch(self, target):
-        """returns true if the fist collides with the target"""
-        if not self.punching:
-            self.punching = True
-            hitbox = self.rect.inflate(-5, -5)
-            return hitbox.colliderect(target.rect)
+        path = full_path(song["file"])
+        if not os.path.exists(path):
+            pygame.mixer.music.stop()
+            self.playing = False
+            self.message = f"Missing file: {song['file']}"
+            return
 
-    def unpunch(self):
-        """called to pull the fist back"""
-        self.punching = False
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.play()
+        self.playing = True
+        self.message = ""
 
+    def next(self):
+        self.play(0 if self.index is None else self.index + 1)
 
-class Chimp(pg.sprite.Sprite):
-    """moves a monkey critter across the screen. it can spin the
-    monkey when it is punched."""
+    def previous(self):
+        self.play(0 if self.index is None else self.index - 1)
 
-    def __init__(self):
-        pg.sprite.Sprite.__init__(self)  # call Sprite initializer
-        self.image, self.rect = load_image("download.webp", -1, 4)
-        screen = pg.display.get_surface()
-        self.area = screen.get_rect()
-        self.rect.topleft = 10, 90
-        self.move = 18
-        self.dizzy = False
+    def song_finished(self):
+        """True when the current song has reached its end."""
+        return self.playing and not self.paused and not pygame.mixer.music.get_busy()
 
-    def update(self):
-        """walk or spin, depending on the monkeys state"""
-        if self.dizzy:
-            self._spin()
+    def toggle_pause(self):
+        if not self.playing:
+            return
+        if self.paused:
+            pygame.mixer.music.unpause()
         else:
-            self._walk()
+            pygame.mixer.music.pause()
+        self.paused = not self.paused
 
-    def _walk(self):
-        """move the monkey across the screen, and turn at the ends"""
-        newpos = self.rect.move((self.move, 0))
-        if not self.area.contains(newpos):
-            if self.rect.left < self.area.left or self.rect.right > self.area.right:
-                self.move = -self.move
-                newpos = self.rect.move((self.move, 0))
-                self.image = pg.transform.flip(self.image, True, False)
-        self.rect = newpos
 
-    def _spin(self):
-        """spin the monkey image"""
-        center = self.rect.center
-        self.dizzy = self.dizzy + 12
-        if self.dizzy >= 360:
-            self.dizzy = False
-            self.image = self.original
-        else:
-            rotate = pg.transform.rotate
-            self.image = rotate(self.original, self.dizzy)
-        self.rect = self.image.get_rect(center=center)
+def draw(screen, fonts, player):
+    big, medium, small = fonts
+    screen.fill(BG)
 
-    def punched(self):
-        """this will cause the monkey to start spinning"""
-        if not self.dizzy:
-            self.dizzy = True
-            self.original = self.image
+    # Album art (or an empty box before anything has played)
+    if player.art:
+        # Center the art inside its square
+        x = ART_POS[0] + (ART_SIZE - player.art.get_width()) // 2
+        y = ART_POS[1] + (ART_SIZE - player.art.get_height()) // 2
+        screen.blit(player.art, (x, y))
+    else:
+        pygame.draw.rect(screen, HIGHLIGHT, (*ART_POS, ART_SIZE, ART_SIZE), border_radius=8)
+        hint = medium.render("No song loaded", True, DIM)
+        screen.blit(hint, hint.get_rect(center=(ART_POS[0] + ART_SIZE // 2, ART_POS[1] + ART_SIZE // 2)))
+
+    # Now playing
+    if player.index is not None:
+        song = playlist[player.index]
+        status = "Paused" if player.paused else "Now playing"
+        screen.blit(small.render(status, True, ACCENT), (ART_POS[0], 20))
+        screen.blit(medium.render(f"{song['title']} - {song['artist']}", True, TEXT), (ART_POS[0], 440))
+    if player.message:
+        screen.blit(small.render(player.message, True, ERROR), (ART_POS[0], 470))
+
+    # Playlist
+    screen.blit(big.render("Playlist", True, TEXT), (LIST_X, 50))
+    for i, song in enumerate(playlist):
+        row = pygame.Rect(LIST_X, LIST_Y + i * ROW_HEIGHT, WIDTH - LIST_X - 30, ROW_HEIGHT - 6)
+        if i == player.index:
+            pygame.draw.rect(screen, HIGHLIGHT, row, border_radius=6)
+        color = ACCENT if i == player.index else TEXT
+        screen.blit(medium.render(f"{i + 1}. {song['title']}", True, color), (row.x + 12, row.y + 4))
+        screen.blit(small.render(f"{song['artist']}  ·  {song['album']}", True, DIM), (row.x + 34, row.y + 26))
+
+    # Controls help
+    help_lines = ["1-9 / click: play song", "N / Right: next   P / Left: previous", "Space: pause   Esc: quit"]
+    for i, line in enumerate(help_lines):
+        screen.blit(small.render(line, True, DIM), (LIST_X, 380 + i * 22))
+
+    pygame.display.flip()
+
+
+def song_at(pos):
+    """Return the playlist index under the mouse, or None."""
+    x, y = pos
+    if x < LIST_X:
+        return None
+    i = (y - LIST_Y) // ROW_HEIGHT
+    if y >= LIST_Y and i < len(playlist):
+        return i
+    return None
 
 
 def main():
-    """this function is called when the program starts.
-    it initializes everything it needs, then runs in
-    a loop until the function returns."""
-    # Initialize Everything
-    pg.init()
-    screen = pg.display.set_mode((1280, 480), pg.SCALED)
-    pg.display.set_caption("Monkey Fever")
-    pg.mouse.set_visible(False)
+    pygame.init()
+    pygame.mixer.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Song Player")
+    fonts = (pygame.font.Font(None, 40), pygame.font.Font(None, 28), pygame.font.Font(None, 22))
+    clock = pygame.time.Clock()
 
-    # Create The Background
-    background = pg.Surface(screen.get_size())
-    background = background.convert()
-    background.fill((170, 238, 187))
+    player = Player()
 
-    # Put Text On The Background, Centered
-    if pg.font:
-        font = pg.font.Font(None, 64)
-        text = font.render("Pummel The Chimp, And Win $$$", True, (10, 10, 10))
-        textpos = text.get_rect(centerx=background.get_width() / 2, y=10)
-        background.blit(text, textpos)
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
-    # Display The Background
-    screen.blit(background, (0, 0))
-    pg.display.flip()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                elif event.key in (pygame.K_n, pygame.K_RIGHT):
+                    player.next()
+                elif event.key in (pygame.K_p, pygame.K_LEFT):
+                    player.previous()
+                elif event.key == pygame.K_SPACE:
+                    player.toggle_pause()
+                elif pygame.K_1 <= event.key <= pygame.K_9:
+                    choice = event.key - pygame.K_1
+                    if choice < len(playlist):
+                        player.play(choice)
 
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                choice = song_at(event.pos)
+                if choice is not None:
+                    player.play(choice)
 
-    chimp = Chimp()
-    fist = Fist()
-    allsprites = pg.sprite.RenderPlain((chimp, fist))
-    clock = pg.time.Clock()
+        # When a song ends, move on to the next one automatically
+        if player.song_finished():
+            player.next()
 
-    # Main Loop
-    going = True
-    while going:
-        clock.tick(60)
+        draw(screen, fonts, player)
+        clock.tick(30)
 
-        # Handle Input Events
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                going = False
-            elif event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
-                going = False
-           
-            elif event.type == pg.MOUSEBUTTONUP:
-                fist.unpunch()
-
-        allsprites.update()
-
-        # Draw Everything
-        screen.blit(background, (0, 0))
-        allsprites.draw(screen)
-        pg.display.flip()
-
-    pg.quit()
+    pygame.quit()
 
 
-# Game Over
-
-
-# this calls the 'main' function when this script is executed
 if __name__ == "__main__":
     main()
