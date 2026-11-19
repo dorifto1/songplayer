@@ -28,25 +28,25 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 playlist = [
     {
-        "title": "Song One",
-        "artist": "Artist One",
-        "album": "Album One",
+        "title": "MASHA FUNK",
+        "artist": "MASHA",
+        "album": "MASHABOMBASTICPHONKCOLLETION",
         "file": "songs/song1.mp3",
         "art": "art/song1.jpg",
     },
     {
-        "title": "Song Two",
-        "artist": "Artist Two",
-        "album": "Album Two",
+        "title": "OLD TOWN ROAD",
+        "artist": "LIL NAS X",
+        "album": "7",
         "file": "songs/song2.mp3",
         "art": "art/song2.jpg",
     },
     {
-        "title": "Song Three",
-        "artist": "Artist Three",
-        "album": "Album Three",
+        "title": "JENSEN HUANG PHONK",
+        "artist": "MRLEATHERJACKET^3",
+        "album": "4BADDIES ",
         "file": "songs/song3.mp3",
-        "art": "art/song3.jpg",
+        "art": "art/song3.png",
     },
 ]
 
@@ -61,6 +61,10 @@ LIST_X = 440
 LIST_Y = 110
 ROW_HEIGHT = 50
 
+# Volume bar (click or drag on it, or use Up/Down arrows)
+VOLUME_BAR = pygame.Rect(LIST_X + 90, 462, 300, 10)
+VOLUME_STEP = 0.1
+
 # Colors
 BG = (24, 26, 33)
 TEXT = (235, 235, 240)
@@ -74,10 +78,15 @@ def full_path(relative):
 
 
 def load_album_art(song):
-    """Open the album art with Pillow and turn it into a pygame Surface."""
+    """Open the album art with Pillow and turn it into a pygame Surface.
+
+    Returns None if neither the song's art nor the default art can be found.
+    """
     path = full_path(song["art"])
     if not os.path.exists(path):
         path = full_path(DEFAULT_ART)
+    if not os.path.exists(path):
+        return None
 
     image = Image.open(path).convert("RGB")
     # Scale to fit inside ART_SIZE x ART_SIZE without stretching
@@ -92,6 +101,13 @@ class Player:
         self.playing = False     # True while a real song file is loaded
         self.art = None
         self.message = "Pick a song to start"
+        self.volume = 0.7        # 0.0 = silent, 1.0 = full
+        pygame.mixer.music.set_volume(self.volume)
+
+    def set_volume(self, volume):
+        """Change the volume, kept between 0.0 and 1.0."""
+        self.volume = max(0.0, min(1.0, volume))
+        pygame.mixer.music.set_volume(self.volume)
 
     def play(self, index):
         """Load the song at this position in the playlist and play it."""
@@ -108,6 +124,7 @@ class Player:
             return
 
         pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(self.volume)
         pygame.mixer.music.play()
         self.playing = True
         self.message = ""
@@ -144,7 +161,8 @@ def draw(screen, fonts, player):
         screen.blit(player.art, (x, y))
     else:
         pygame.draw.rect(screen, HIGHLIGHT, (*ART_POS, ART_SIZE, ART_SIZE), border_radius=8)
-        hint = medium.render("No song loaded", True, DIM)
+        hint_text = "No album art" if player.index is not None else "No song loaded"
+        hint = medium.render(hint_text, True, DIM)
         screen.blit(hint, hint.get_rect(center=(ART_POS[0] + ART_SIZE // 2, ART_POS[1] + ART_SIZE // 2)))
 
     # Now playing
@@ -167,9 +185,22 @@ def draw(screen, fonts, player):
         screen.blit(small.render(f"{song['artist']}  ·  {song['album']}", True, DIM), (row.x + 34, row.y + 26))
 
     # Controls help
-    help_lines = ["1-9 / click: play song", "N / Right: next   P / Left: previous", "Space: pause   Esc: quit"]
+    help_lines = [
+        "1-9 / click: play song",
+        "N / Right: next   P / Left: previous",
+        "Space: pause   Up / Down: volume   Esc: quit",
+    ]
     for i, line in enumerate(help_lines):
         screen.blit(small.render(line, True, DIM), (LIST_X, 380 + i * 22))
+
+    # Volume bar: grey track, green fill, round knob
+    label = small.render(f"Volume {round(player.volume * 100)}%", True, TEXT)
+    screen.blit(label, label.get_rect(midleft=(LIST_X, VOLUME_BAR.centery)))
+    pygame.draw.rect(screen, HIGHLIGHT, VOLUME_BAR, border_radius=5)
+    filled = VOLUME_BAR.copy()
+    filled.width = round(VOLUME_BAR.width * player.volume)
+    pygame.draw.rect(screen, ACCENT, filled, border_radius=5)
+    pygame.draw.circle(screen, TEXT, (VOLUME_BAR.x + filled.width, VOLUME_BAR.centery), 8)
 
     pygame.display.flip()
 
@@ -185,6 +216,11 @@ def song_at(pos):
     return None
 
 
+def volume_at(x):
+    """Turn a mouse x position on the volume bar into a volume (0.0 - 1.0)."""
+    return (x - VOLUME_BAR.x) / VOLUME_BAR.width
+
+
 def main():
     pygame.init()
     pygame.mixer.init()
@@ -194,6 +230,7 @@ def main():
     clock = pygame.time.Clock()
 
     player = Player()
+    dragging_volume = False
 
     running = True
     while running:
@@ -210,15 +247,33 @@ def main():
                     player.previous()
                 elif event.key == pygame.K_SPACE:
                     player.toggle_pause()
+                elif event.key == pygame.K_UP:
+                    player.set_volume(player.volume + VOLUME_STEP)
+                elif event.key == pygame.K_DOWN:
+                    player.set_volume(player.volume - VOLUME_STEP)
                 elif pygame.K_1 <= event.key <= pygame.K_9:
                     choice = event.key - pygame.K_1
                     if choice < len(playlist):
                         player.play(choice)
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                choice = song_at(event.pos)
-                if choice is not None:
-                    player.play(choice)
+                # A slightly taller hit box makes the thin bar easier to grab
+                if VOLUME_BAR.inflate(16, 20).collidepoint(event.pos):
+                    dragging_volume = True
+                    player.set_volume(volume_at(event.pos[0]))
+                else:
+                    choice = song_at(event.pos)
+                    if choice is not None:
+                        player.play(choice)
+
+            elif event.type == pygame.MOUSEMOTION and dragging_volume:
+                player.set_volume(volume_at(event.pos[0]))
+
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                dragging_volume = False
+
+            elif event.type == pygame.MOUSEWHEEL:
+                player.set_volume(player.volume + event.y * VOLUME_STEP / 2)
 
         # When a song ends, move on to the next one automatically
         if player.song_finished():
