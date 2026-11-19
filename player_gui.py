@@ -40,7 +40,7 @@ playlist = [
         "artist": "Artist Three",
         "album": "Album Three",
         "file": "songs/song3.mp3",
-        "art": "art/song3.jpg",
+        "art": "art/song3.png",
     },
 ]
 
@@ -61,10 +61,15 @@ def full_path(relative):
 
 
 def load_album_art(song):
-    """Open the album art with Pillow and turn it into a tkinter image."""
+    """Open the album art with Pillow and turn it into a tkinter image.
+
+    Returns None if neither the song's art nor the default art can be found.
+    """
     path = full_path(song["art"])
     if not os.path.exists(path):
         path = full_path(DEFAULT_ART)
+    if not os.path.exists(path):
+        return None
 
     image = Image.open(path).convert("RGB")
     image.thumbnail((ART_SIZE, ART_SIZE))
@@ -137,8 +142,22 @@ class SongPlayerApp:
             button.grid(row=0, column=col, padx=4)
             self.buttons[name] = button
 
+        # Volume slider: label + Scale side by side, using grid() inside a frame
+        volume_row = tk.Frame(right, bg=BG)
+        volume_row.pack(fill="x", pady=(6, 0))
+        tk.Label(volume_row, text="🔊 Volume", font=("Arial", 11), fg=TEXT, bg=BG).grid(row=0, column=0, padx=(0, 8))
+
+        self.volume = tk.IntVar(value=70)   # 0-100, the Scale and the arrow keys share it
+        tk.Scale(
+            volume_row, from_=0, to=100, orient="horizontal", variable=self.volume,
+            command=lambda value: self.apply_volume(), length=220, showvalue=True,
+            bg=BG, fg=TEXT, troughcolor=PANEL, activebackground=ACCENT,
+            highlightthickness=0, bd=0, sliderrelief="flat",
+        ).grid(row=0, column=1)
+        self.apply_volume()
+
         tk.Label(
-            right, text="Double-click a song to play it.\nSpace: pause   ←/→: previous/next",
+            right, text="Double-click a song to play it.\nSpace: pause   ←/→: previous/next   ↑/↓: volume",
             font=("Arial", 10), fg=DIM, bg=BG, justify="left",
         ).pack(anchor="w", pady=(10, 0))
 
@@ -146,6 +165,10 @@ class SongPlayerApp:
         window.bind("<space>", lambda e: self.toggle_pause())
         window.bind("<Right>", lambda e: self.next())
         window.bind("<Left>", lambda e: self.previous())
+        # Up/Down in the playlist box move the selection, so only bind them on the window
+        # when the playlist doesn't have focus.
+        window.bind("<Up>", lambda e: self.change_volume(10) if e.widget is not self.listbox else None)
+        window.bind("<Down>", lambda e: self.change_volume(-10) if e.widget is not self.listbox else None)
 
         window.protocol("WM_DELETE_WINDOW", self.quit)
         self.check_song_end()
@@ -153,6 +176,15 @@ class SongPlayerApp:
     def _blank_image(self):
         self._blank = tk.PhotoImage(width=ART_SIZE, height=ART_SIZE)
         return self._blank
+
+    # --- Volume ---
+    def apply_volume(self):
+        """Send the slider's value (0-100) to pygame (0.0-1.0)."""
+        pygame.mixer.music.set_volume(self.volume.get() / 100)
+
+    def change_volume(self, amount):
+        self.volume.set(max(0, min(100, self.volume.get() + amount)))
+        self.apply_volume()
 
     # --- Music controls ---
     def play(self, index):
@@ -162,7 +194,10 @@ class SongPlayerApp:
 
         # Show the album art as soon as the song loads
         self.art_image = load_album_art(song)
-        self.art_label.config(image=self.art_image, text="")
+        if self.art_image:
+            self.art_label.config(image=self.art_image, text="")
+        else:
+            self.art_label.config(image=self._blank, text="No album art")
 
         self.title_label.config(text=song["title"])
         self.artist_label.config(text=f"{song['artist']}  ·  {song['album']}")
@@ -180,6 +215,7 @@ class SongPlayerApp:
             return
 
         pygame.mixer.music.load(path)
+        self.apply_volume()
         pygame.mixer.music.play()
         self.playing = True
         self.status_label.config(text="Now playing", fg=ACCENT)
